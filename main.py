@@ -12,10 +12,10 @@ from tensorflow.python.keras.optimizer_v2.adam import Adam
 
 from adamlrm import AdamLRM
 
-NR_IMAGES_PER_BATCH = 1
+NR_IMAGES_PER_BATCH = 10
 DEFAULT_IMAGE_SIZE = 256
 
-NR_EPOCHS = 4
+NR_EPOCHS = 200
 
 ARG_X8 = "x8"
 ARG_MILD = "mild"
@@ -80,7 +80,7 @@ SRCNN = Sequential()
 # add model layers
 SRCNN.add(
     Conv2D(filters=128, kernel_size=(9, 9), kernel_initializer='glorot_uniform', activation='relu', padding="same",
-           use_bias=True, input_shape=(128, 128, 3), name="layer1"))
+           use_bias=True, input_shape=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE, 3), name="layer1"))
 SRCNN.add(
     Conv2D(filters=64, kernel_size=(3, 3), kernel_initializer='glorot_uniform', activation='relu', padding="same",
            use_bias=True, name="layer2"))
