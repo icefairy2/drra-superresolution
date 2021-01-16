@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import tensorflow as tf
 from tensorflow.keras import regularizers
-from tensorflow.keras.layers import add, Conv2D, UpSampling2D, MaxPooling2D, Dropout, Input
+from tensorflow.keras.layers import add, Conv2D, UpSampling2D, MaxPooling2D, Dropout, Input, Add
 from tensorflow.keras.models import Model
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.optimizer_v2.adam import Adam
@@ -115,23 +115,21 @@ learning_rate_multipliers['layer3'] = 0.00001
 
 
 """ ANOTHER MODEL from https://github.com/dongheehand/RCAN-tf """
-RCAN = Sequential()
+l1 = Mean_shifter(input_img, RGB_MEAN, sign=-1, rgb_range=255)
+l2 = Conv2D(64, (3, 3), 1, padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(l1)
 
-x = Mean_shifter(input_img, RGB_MEAN, sign=-1, rgb_range=255)
-x = Conv(name="conv_SF", x=x, filter_size=1, in_filters=3, out_filters=64, strides=1)  # not sure about the out_filters
-LongSkipConnection = x
-
+l_prev = l2
 for i in range(n_RG):
-    x = Residual_Group('RG%02d' % i, x, n_RCAB, 3, ratio=16, n_feats=64)
+    l_out = Residual_Group('RG%02d' % i, l_prev, n_RCAB, 3, ratio=16, n_feats=64)
+    l_prev = l_out
 
-x = Conv(name='conv_LSC', x=x, filter_size=3, in_filters=64, out_filters=64, strides=1)
-x = x + LongSkipConnection
+l3 = Conv2D(64, (3, 3), 1, padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(l_out)
+l4 = Add()([l3, l2])
 
-x = Up_scaling('up_sample', x, 3, 64, scale=8)
-x = Conv('conv_rec', x=x, filter_size=3, in_filters=64, out_filters=3, strides=1)
+l5 = UpSampling2D()(l4)
+l6 = Conv2D(3, (3, 3), 1, padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(l5)
 
-output = Mean_shifter(x, RGB_MEAN, sign=1, rgb_range=255)
-# loss = tf.compat.v1.reduce_mean(tf.compat.v1.abs(input_img - output))
+output = Mean_shifter(l6, RGB_MEAN, sign=1, rgb_range=255)
 
 lr = tf.compat.v1.train.exponential_decay(0.0001, 0.9, 0.999, 0.5, staircase=True)
 optimizer = tf.compat.v1.train.AdamOptimizer(learning_rate=lr)
