@@ -11,6 +11,8 @@ from tensorflow.keras.models import Model
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.optimizer_v2.adam import Adam
 
+from adamlrm import AdamLRM
+
 NR_IMAGES_PER_BATCH = 10
 DEFAULT_IMAGE_SIZE = (128, 128)
 
@@ -35,6 +37,7 @@ LOW_RES_DATA_PATH_TEST_WILD = "data/DIV2K_valid_LR_wild"
 
 LOW_RES_DATA_PATH_TRAIN_DIFFICULT = "data/DIV2K_train_LR_difficult"
 LOW_RES_DATA_PATH_TEST_DIFFICULT = "data/DIV2K_valid_LR_difficult"
+
 
 ####################### TODO IMPLEMENT MODEL #############################
 
@@ -78,7 +81,7 @@ decoded = Conv2D(3, (3, 3), padding='same', activation='relu', activity_regulari
 autoencoder = Model(input_img, decoded)
 autoencoder_hfenn = Model(input_img, decoded)
 
-autoencoder.summary()
+# autoencoder.summary()
 autoencoder.compile(optimizer="Adam", loss="mse")
 
 """ ANOTHER MODEL from https://github.com/xoraus/Super-Resolution-CNN-for-Image-Restoration """
@@ -87,19 +90,26 @@ SRCNN = Sequential()
 
 # add model layers
 SRCNN.add(
-    Conv2D(filters=128, kernel_size=(9, 9), kernel_initializer='glorot_uniform', activation='relu', padding='valid',
-           use_bias=True, input_shape=(128, 128, 3)))
-SRCNN.add(Conv2D(filters=64, kernel_size=(3, 3), kernel_initializer='glorot_uniform', activation='relu', padding='same',
-                 use_bias=True))
+    Conv2D(filters=128, kernel_size=(9, 9), kernel_initializer='glorot_uniform', activation='relu', padding="same",
+           use_bias=True, input_shape=(128, 128, 3), name="layer1"))
 SRCNN.add(
-    Conv2D(filters=1, kernel_size=(5, 5), kernel_initializer='glorot_uniform', activation='linear', padding='valid',
-           use_bias=True))
+    Conv2D(filters=64, kernel_size=(3, 3), kernel_initializer='glorot_uniform', activation='relu', padding="same",
+           use_bias=True, name="layer2"))
+SRCNN.add(
+    Conv2D(filters=1, kernel_size=(5, 5), kernel_initializer='glorot_uniform', activation='linear', padding="same",
+           use_bias=True, name="layer3"))
 
-# define optimizer
-adam = Adam(lr=0.0003)
+lr_multiplier = {
+    'layer1': 0.0001,  # optimize 'var1*' with a smaller learning rate
+    'layer2': 0.0001,
+    'layer3': 0.00001 # optimize 'var2*' with a larger learning rate
+}
+
+opt = AdamLRM(lr=0.001, lr_multiplier=lr_multiplier)
 
 # compile model
-SRCNN.compile(optimizer=adam, loss='mean_squared_error', metrics=['mean_squared_error'])
+SRCNN.compile(optimizer=opt, loss='mean_squared_error', metrics=['mean_squared_error'])
+SRCNN.summary()
 
 
 ###################################################################
@@ -119,6 +129,27 @@ def define_low_res_paths(type=ARG_X8):
         print("Using realistic difficult x4 downscaling...")
         return LOW_RES_DATA_PATH_TRAIN_DIFFICULT, LOW_RES_DATA_PATH_TEST_DIFFICULT
 
+# TODO: implement the correct conversion to Y
+
+def convert_to_Y(image):
+    # convert the image to YCrCb - (srcnn trained on Y channel)
+    temp = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
+
+    # create image slice and normalize
+    y = np.zeros((1, temp.shape[0], temp.shape[1], 1), dtype=float)
+    y[0, :, :, 0] = temp[:, :, 0].astype(float) / 255
+
+    return y
+
+
+def convert_to_RGB(images, temp=None, output=None):
+    # copy Y channel back to image and convert to BGR    
+    for image in range(len(images)):
+        temp[:, :, 0] = image[0, :, :, 0]
+        output[image] = cv2.cvtColor(temp, cv2.COLOR_YCrCb2BGR)
+
+    return output
+
 
 def read_image_data(path, shape=(128, 128)):
     images = []
@@ -126,6 +157,8 @@ def read_image_data(path, shape=(128, 128)):
         image = cv2.imread(os.path.join(path, filename))
         if image is not None:
             image_resized = cv2.resize(image, shape)
+            # In case we want to use the Y channel only
+            # image_converted = convert_to_Y(image_resized)
             images.append(image_resized)
     return images
 
@@ -134,11 +167,16 @@ def train_model(high_res_array_train, low_res_array_train, high_res_array_test, 
     assert len(high_res_array_train) == len(low_res_array_train), "Train data value and label length not equal!"
     assert len(high_res_array_test) == len(low_res_array_test), "Test data value and label length not equal!"
 
-    autoencoder.fit(low_res_array_train, high_res_array_train,
-                    epochs=NR_EPOCHS,
-                    batch_size=NR_IMAGES_PER_BATCH,
-                    shuffle=True,
-                    validation_data=(low_res_array_test, high_res_array_test))
+    # autoencoder.fit(low_res_array_train, high_res_array_train,
+    #                 epochs=NR_EPOCHS,
+    #                 batch_size=NR_IMAGES_PER_BATCH,
+    #                 shuffle=True,
+    #                 validation_data=(low_res_array_test, high_res_array_test))
+
+    SRCNN.fit(low_res_array_train, high_res_array_train,
+              epochs=NR_EPOCHS,
+              batch_size=NR_IMAGES_PER_BATCH,
+              validation_data=(low_res_array_test, high_res_array_test))
 
 
 if __name__ == "__main__":
@@ -177,7 +215,9 @@ if __name__ == "__main__":
     train_model(high_res_array_train, low_res_array_train, high_res_array_test, low_res_array_test)
 
     print("Predicting images...")
-    predicted_images = autoencoder.predict(low_res_array_train)
+    # predicted_images = autoencoder.predict(low_res_array_train)
+    predicted_images = SRCNN.predict(low_res_array_train)
+    # predicted_images = convert_to_RGB(predicted_images)
 
     # Pick a random image to visualize
     image_index = np.random.randint(0, 799)
