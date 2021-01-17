@@ -9,7 +9,7 @@ from tensorflow.keras.models import Model
 from tensorflow.keras.utils import plot_model
 from tensorflow.python.keras.optimizer_v2.adam import Adam
 
-NR_IMAGES_PER_BATCH = 1
+NR_IMAGES_PER_BATCH = 10
 DEFAULT_IMAGE_SIZE = 256
 
 NR_EPOCHS = 4
@@ -63,8 +63,9 @@ decoded = Conv2D(3, (3, 3), padding='same', activation='relu', activity_regulari
 super_resolution_model = Model(input_img, decoded)
 
 super_resolution_model.summary()
-# install https://www2.graphviz.org/Packages/stable/windows/10/cmake/Release/x64/graphviz-install-2.44.1-win64.exe
-# I also had to run the command 'dot -c' with administrator privileges (Windows)
+# Windows:
+# - install https://www2.graphviz.org/Packages/stable/windows/10/cmake/Release/x64/graphviz-install-2.44.1-win64.exe
+# - run the command 'dot -c' with administrator privileges
 plot_model(super_resolution_model, to_file='model.png')
 
 adam = Adam(lr=0.0003)
