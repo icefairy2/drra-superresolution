@@ -5,6 +5,7 @@ import cv2
 import numpy as np
 from tensorflow.keras.layers import Conv2D
 from tensorflow.python.keras.models import Sequential
+from tensorflow.python.keras.utils.vis_utils import plot_model
 
 from adamlrm import AdamLRM
 
@@ -64,8 +65,16 @@ opt = AdamLRM(lr=0.01, lr_multiplier=lr_multiplier)
 SRCNN_modified.compile(optimizer=opt, loss='mean_squared_error', metrics=['mean_squared_error'])
 SRCNN_modified.summary()
 
+# This is a method to automatically plot the model architecture
+# For Windows:
+# - you need to install Graphviz from
+#   https://www2.graphviz.org/Packages/stable/windows/10/cmake/Release/x64/graphviz-install-2.44.1-win64.exe
+# - install pydot via: pip install pydot
+# - run a cmd as administrator and run the command 'dot -c'
+plot_model(SRCNN_modified, to_file='model.png')
 
-def define_low_res_paths(type=ARG_X8):
+
+def define_low_res_paths(type):
     """
     This method parses the command line argument and chooses the path to the corresponding low resolution image category
     :param type: the low resolution image category, default ARG_X8='x8'
@@ -121,7 +130,11 @@ def train_model(high_res_array_train, low_res_array_train):
 
 
 if __name__ == "__main__":
-    low_res_type = sys.argv[1]
+    low_res_type = ARG_X8
+
+    # Read command line arguments
+    if len(sys.argv) > 0:
+        low_res_type = sys.argv[1]
 
     low_res_train_path, low_res_test_path = define_low_res_paths(low_res_type)
 
@@ -139,18 +152,6 @@ if __name__ == "__main__":
 
     low_res_array_test = np.divide(np.array(low_res_test_data), 255, dtype='float32')
     high_res_array_test = np.divide(np.array(high_res_test_data), 255, dtype='float32')
-
-    # with open('data/hr_train.pkl', 'wb') as f:
-    #     pickle.dump(high_res_array_train, f)
-    #
-    # with open('data/hr_test.pkl', 'wb') as f:
-    #     pickle.dump(high_res_array_test, f)
-
-    # with open('data/hr_train.pkl', 'rb') as f:
-    #     high_res_array_train = pickle.load(f)
-    #
-    # with open('data/hr_test.pkl', 'rb') as f:
-    #     high_res_array_test = pickle.load(f)
 
     print("Training model...")
     train_model(high_res_array_train, low_res_array_train)
