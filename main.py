@@ -3,25 +3,26 @@ import sys
 
 import cv2
 import numpy as np
-from tensorflow.keras import regularizers
-from tensorflow.keras.layers import add, Conv2D, UpSampling2D, MaxPooling2D, Dropout, Input
-from tensorflow.keras.models import Model
-from tensorflow.keras.utils import plot_model
+from tensorflow.keras.layers import Conv2D
 from tensorflow.python.keras.models import Sequential
-from tensorflow.python.keras.optimizer_v2.adam import Adam
 
 from adamlrm import AdamLRM
 
+# Constants for training hyperparameters
+
+DEFAULT_IMAGE_SIZE = 512
+
+NR_EPOCHS = 100
 NR_IMAGES_PER_BATCH = 10
-DEFAULT_IMAGE_SIZE = 256
+VALIDATION_SPLIT = 0.2
 
-NR_EPOCHS = 200
-
+# Constants for command line arguments
 ARG_X8 = "x8"
 ARG_MILD = "mild"
 ARG_WILD = "wild"
 ARG_DIFFICULT = "difficult"
 
+# Constants for data paths
 HIGH_RES_DATA_PATH_TRAIN = "data/DIV2K_train_HR"
 HIGH_RES_DATA_PATH_TEST = "data/DIV2K_valid_HR"
 
@@ -37,74 +38,39 @@ LOW_RES_DATA_PATH_TEST_WILD = "data/DIV2K_valid_LR_wild"
 LOW_RES_DATA_PATH_TRAIN_DIFFICULT = "data/DIV2K_train_LR_difficult"
 LOW_RES_DATA_PATH_TEST_DIFFICULT = "data/DIV2K_valid_LR_difficult"
 
-####################### TODO IMPLEMENT MODEL #############################
-input_img = Input(shape=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE, 3))
+# The model which we based on SRCNN but modified in the best way we could
+# http://mmlab.ie.cuhk.edu.hk/projects/SRCNN.html
+SRCNN_modified = Sequential()
 
-l2 = Conv2D(64, (3, 3), padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(input_img)
+SRCNN_modified.add(Conv2D(filters=128, kernel_size=(9, 9), activation='relu', padding="same", use_bias=True,
+                          input_shape=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE, 3), name="layer1"))
+SRCNN_modified.add(
+    Conv2D(filters=64, kernel_size=(3, 3), activation='relu', padding="same", use_bias=True, name="layer2"))
+SRCNN_modified.add(
+    Conv2D(filters=3, kernel_size=(5, 5), activation='relu', padding="same", use_bias=True, name="layer3"))
 
-l3 = MaxPooling2D(padding='same')(l2)
-l3 = Dropout(0.3)(l3)
-l5 = Conv2D(128, (3, 3), padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(l3)
-
-l6 = MaxPooling2D(padding='same')(l5)
-l7 = Conv2D(256, (3, 3), padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(l6)
-
-l8 = UpSampling2D()(l7)
-
-l10 = Conv2D(128, (3, 3), padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(l8)
-
-l11 = add([l5, l10])
-l12 = UpSampling2D()(l11)
-l14 = Conv2D(64, (3, 3), padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(l12)
-
-l15 = add([l14, l2])
-
-# chan = 3, for RGB
-decoded = Conv2D(3, (3, 3), padding='same', activation='relu', activity_regularizer=regularizers.l1(10e-10))(l15)
-
-# Create our network
-super_resolution_model = Model(input_img, decoded)
-
-super_resolution_model.summary()
-# install https://www2.graphviz.org/Packages/stable/windows/10/cmake/Release/x64/graphviz-install-2.44.1-win64.exe
-# I also had to run the command 'dot -c' with administrator privileges (Windows)
-plot_model(super_resolution_model, to_file='model.png')
-
-adam = Adam(lr=0.0003)
-super_resolution_model.compile(optimizer=adam, loss='mean_squared_error', metrics=['mean_squared_error'])
-
-""" ANOTHER MODEL from https://github.com/xoraus/Super-Resolution-CNN-for-Image-Restoration """
-# define model type
-SRCNN = Sequential()
-
-# add model layers
-SRCNN.add(
-    Conv2D(filters=128, kernel_size=(9, 9), kernel_initializer='glorot_uniform', activation='relu', padding="same",
-           use_bias=True, input_shape=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE, 3), name="layer1"))
-SRCNN.add(
-    Conv2D(filters=64, kernel_size=(3, 3), kernel_initializer='glorot_uniform', activation='relu', padding="same",
-           use_bias=True, name="layer2"))
-SRCNN.add(
-    Conv2D(filters=1, kernel_size=(5, 5), kernel_initializer='glorot_uniform', activation='linear', padding="same",
-           use_bias=True, name="layer3"))
-
+# We implemented variable learning rates per layer in order to try to achieve good performance
 lr_multiplier = {
-    'layer1': 0.0001,  # optimize 'var1*' with a smaller learning rate
+    'layer1': 0.001,
     'layer2': 0.0001,
-    'layer3': 0.00001  # optimize 'var2*' with a larger learning rate
+    'layer3': 0.00001
 }
 
-opt = AdamLRM(lr=0.001, lr_multiplier=lr_multiplier)
+# In order to achieve variable learning rates, we based ourselves on the implementation of akinoux
+# for a modified Adam optimizer: https://github.com/akionux/AdamLRM
+opt = AdamLRM(lr=0.01, lr_multiplier=lr_multiplier)
 
-# compile model
-SRCNN.compile(optimizer=opt, loss='mean_squared_error', metrics=['mean_squared_error'])
-SRCNN.summary()
-
-
-###################################################################
+# We use MSE as a loss function like the original SRCNN
+SRCNN_modified.compile(optimizer=opt, loss='mean_squared_error', metrics=['mean_squared_error'])
+SRCNN_modified.summary()
 
 
 def define_low_res_paths(type=ARG_X8):
+    """
+    This method parses the command line argument and chooses the path to the corresponding low resolution image category
+    :param type: the low resolution image category, default ARG_X8='x8'
+    :return: the path to the low resolution images
+    """
     if type is None or type == ARG_X8:
         print("Using bicubic x8 downscaling...")
         return LOW_RES_DATA_PATH_TRAIN_X8, LOW_RES_DATA_PATH_TEST_X8
@@ -119,49 +85,39 @@ def define_low_res_paths(type=ARG_X8):
         return LOW_RES_DATA_PATH_TRAIN_DIFFICULT, LOW_RES_DATA_PATH_TEST_DIFFICULT
 
 
-# TODO: implement the correct conversion to Y
-
-def convert_to_Y(image):
-    # convert the image to YCrCb - (srcnn trained on Y channel)
-    temp = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
-
-    # create image slice and normalize
-    y = np.zeros((1, temp.shape[0], temp.shape[1], 1), dtype=float)
-    y[0, :, :, 0] = temp[:, :, 0].astype(float) / 255
-
-    return y
-
-
-def convert_to_RGB(images, temp=None, output=None):
-    # copy Y channel back to image and convert to BGR
-    for image in range(len(images)):
-        temp[:, :, 0] = image[0, :, :, 0]
-        output[image] = cv2.cvtColor(temp, cv2.COLOR_YCrCb2BGR)
-
-    return output
-
-
 def read_image_data(path, shape=(DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE)):
+    """
+    This method reads in all the images from a given path and returns then in an array; resizing at a common
+    shape is also done here at reading
+    :param path: the folder path to the images
+    :param shape: (width, height) the desired size for the image
+    :return: list of images with equal sizes
+    """
     images = []
     for filename in os.listdir(path):
         image = cv2.imread(os.path.join(path, filename))
         if image is not None:
+            # We added the interpolation parameter because the default compression left artifacts in the
+            # resized high resolution images
             image_resized = cv2.resize(image, shape, interpolation=cv2.INTER_AREA)
-            # In case we want to use the Y channel only
-            # image_converted = convert_to_Y(image_resized)
             images.append(image_resized)
     return images
 
 
-def train_model(high_res_array_train, low_res_array_train, high_res_array_test, low_res_array_test):
+def train_model(high_res_array_train, low_res_array_train):
+    """
+    This method trains our model
+    :param high_res_array_train: the label data, the high resolution image feature array
+    :param low_res_array_train: the input data, the low resolution image feature array
+    """
     assert len(high_res_array_train) == len(low_res_array_train), "Train data value and label length not equal!"
     assert len(high_res_array_test) == len(low_res_array_test), "Test data value and label length not equal!"
 
-    SRCNN.fit(low_res_array_train, high_res_array_train,
-              epochs=NR_EPOCHS,
-              batch_size=NR_IMAGES_PER_BATCH,
-              shuffle=True,
-              validation_data=(low_res_array_test, high_res_array_test))
+    SRCNN_modified.fit(low_res_array_train, high_res_array_train,
+                       epochs=NR_EPOCHS,
+                       batch_size=NR_IMAGES_PER_BATCH,
+                       shuffle=True,
+                       validation_split=VALIDATION_SPLIT)
 
 
 if __name__ == "__main__":
@@ -178,11 +134,11 @@ if __name__ == "__main__":
     high_res_test_data = read_image_data(HIGH_RES_DATA_PATH_TEST)
 
     print("Converting to numpy arrays...")
-    high_res_array_train = np.array(high_res_train_data)
-    low_res_array_train = np.array(low_res_train_data)
+    low_res_array_train = np.divide(np.array(low_res_train_data), 255, dtype='float32')
+    high_res_array_train = np.divide(np.array(high_res_train_data), 255, dtype='float32')
 
-    high_res_array_test = np.array(high_res_test_data)
-    low_res_array_test = np.array(low_res_test_data)
+    low_res_array_test = np.divide(np.array(low_res_test_data), 255, dtype='float32')
+    high_res_array_test = np.divide(np.array(high_res_test_data), 255, dtype='float32')
 
     # with open('data/hr_train.pkl', 'wb') as f:
     #     pickle.dump(high_res_array_train, f)
@@ -197,17 +153,18 @@ if __name__ == "__main__":
     #     high_res_array_test = pickle.load(f)
 
     print("Training model...")
-    train_model(high_res_array_train, low_res_array_train, high_res_array_test, low_res_array_test)
+    train_model(high_res_array_train, low_res_array_train)
 
     # Pick a random image to visualize
-    image_index = np.random.randint(0, len(low_res_train_data) - 1)
+    image_index = np.random.randint(0, len(low_res_test_data) - 1)
 
     print("Predicting random image {0}...".format(image_index))
-    example_image_lr = np.reshape(low_res_array_train[image_index], [1, DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE, 3])
-    predicted_image = SRCNN.predict(example_image_lr)
+    example_image_lr = np.array([low_res_array_test[image_index]])
+    predicted_image = SRCNN_modified.predict(example_image_lr)
+    predicted_image *= 255
 
     # Visualize example image
-    cv2.imshow('Low resolution image', low_res_array_train[image_index])
-    cv2.imshow('High resolution image', high_res_array_train[image_index])
+    cv2.imshow('Low resolution image', low_res_test_data[image_index])
+    cv2.imshow('High resolution image', high_res_test_data[image_index])
     cv2.imshow('Predicted image', predicted_image[0].astype('uint8'))
     cv2.waitKey(0)
