@@ -1,8 +1,10 @@
+import math
 import os
 import sys
 
 import cv2
 import numpy as np
+import matplotlib.pyplot as plt
 from tensorflow.keras.layers import Conv2D
 from tensorflow.python.keras.models import Sequential
 from tensorflow.python.keras.utils.vis_utils import plot_model
@@ -11,9 +13,9 @@ from adamlrm import AdamLRM
 
 # Constants for training hyperparameters
 
-DEFAULT_IMAGE_SIZE = 512
+DEFAULT_IMAGE_SIZE = 64
 
-NR_EPOCHS = 100
+NR_EPOCHS = 3
 NR_IMAGES_PER_BATCH = 10
 VALIDATION_SPLIT = 0.2
 
@@ -65,13 +67,14 @@ opt = AdamLRM(lr=0.01, lr_multiplier=lr_multiplier)
 SRCNN_modified.compile(optimizer=opt, loss='mean_squared_error', metrics=['mean_squared_error'])
 SRCNN_modified.summary()
 
+
 # This is a method to automatically plot the model architecture
 # For Windows:
 # - you need to install Graphviz from
 #   https://www2.graphviz.org/Packages/stable/windows/10/cmake/Release/x64/graphviz-install-2.44.1-win64.exe
 # - install pydot via: pip install pydot
 # - run a cmd as administrator and run the command 'dot -c'
-plot_model(SRCNN_modified, to_file='model.png')
+# plot_model(SRCNN_modified, to_file='model.png')
 
 
 def define_low_res_paths(type):
@@ -129,6 +132,17 @@ def train_model(high_res_array_train, low_res_array_train):
                        validation_split=VALIDATION_SPLIT)
 
 
+def compute_psnr(input_img, label):
+    input_data = input_img.astype(float)
+    label_data = label.astype(float)
+
+    diff = np.mean((input_data - label_data)**2.)
+    if diff == 0:
+        return 100
+    rmse = math.sqrt(np.mean(diff ** 2.))
+    return 20 * math.log10(255. / rmse)
+
+
 if __name__ == "__main__":
     low_res_type = ARG_X8
 
@@ -156,16 +170,41 @@ if __name__ == "__main__":
     print("Training model...")
     train_model(high_res_array_train, low_res_array_train)
 
-    # Pick a random image to visualize
-    image_index = np.random.randint(0, len(low_res_test_data) - 1)
+    print("Compute the PSNR between each LR image and its prediction...")
+    prediction = SRCNN_modified.predict(low_res_array_test)
+    predicted_scores = []
+    bicubic_scores = []
+    for i in range(len(low_res_array_test)):
+        predicted_psnr = compute_psnr(low_res_array_test[i], (prediction[i] * 255))
+        bicubic_interpolation = cv2.resize(low_res_array_test[i], None, fx=1, fy=1, interpolation=cv2.INTER_CUBIC)
+        bicubic_psnr = compute_psnr(bicubic_interpolation, (prediction[i] * 255))
+        predicted_scores.append(predicted_psnr)
+        bicubic_scores.append(bicubic_psnr)
 
-    print("Predicting random image {0}...".format(image_index))
-    example_image_lr = np.array([low_res_array_test[image_index]])
-    predicted_image = SRCNN_modified.predict(example_image_lr)
-    predicted_image *= 255
+    plt.plot(predicted_scores, label="Predicted PSNR")
+    plt.show()
+    plt.plot(bicubic_scores, label="Bicubic PSNR")
+    plt.show()
+
+    print("Predicting the image with the minimum PSNR score...".format(predicted_scores[np.argmin(predicted_scores)]))
+    image_index = np.argmin(predicted_scores)
+    min_image_lr = np.array([low_res_array_test[image_index]])
+    predicted_min_image = SRCNN_modified.predict(min_image_lr)
+    predicted_min_image *= 255
 
     # Visualize example image
-    cv2.imshow('Low resolution image', low_res_test_data[image_index])
-    cv2.imshow('High resolution image', high_res_test_data[image_index])
-    cv2.imshow('Predicted image', predicted_image[0].astype('uint8'))
+    cv2.imshow('Low resolution image with min PSNR', low_res_test_data[image_index])
+    cv2.imshow('High resolution image with min PSNR', high_res_test_data[image_index])
+    cv2.imshow('Predicted image with min PSNR', predicted_min_image[0].astype('uint8'))
+
+    print("Predicting the image with the highest PSNR score...".format(predicted_scores[np.argmax(predicted_scores)]))
+    image_index = np.argmax(predicted_scores)
+    max_image_lr = np.array([low_res_array_test[image_index]])
+    predicted_max_image = SRCNN_modified.predict(max_image_lr)
+    predicted_max_image *= 255
+
+    # Visualize example image
+    cv2.imshow('Low resolution image with max PSNR', low_res_test_data[image_index])
+    cv2.imshow('High resolution image with max PSNR', high_res_test_data[image_index])
+    cv2.imshow('Predicted image with max PSNR', predicted_max_image[0].astype('uint8'))
     cv2.waitKey(0)
