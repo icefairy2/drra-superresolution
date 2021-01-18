@@ -75,6 +75,7 @@ SRCNN_modified.summary()
 #   https://www2.graphviz.org/Packages/stable/windows/10/cmake/Release/x64/graphviz-install-2.44.1-win64.exe
 # - install pydot via: pip install pydot
 # - run a cmd as administrator and run the command 'dot -c'
+# Uncomment the next line to create the model image
 # plot_model(SRCNN_modified, to_file='model.png')
 
 
@@ -134,6 +135,13 @@ def train_model(high_res_array_train, low_res_array_train):
 
 
 def compute_psnr(input_img, label):
+    """
+    Computes the Peak signal-to-noise ratio between two images
+    https://en.wikipedia.org/wiki/Peak_signal-to-noise_ratio
+    :param input_img: one of the images to compare
+    :param label: the other image to compare
+    :return: a logarithmic quantity in decibel
+    """
     input_data = input_img.astype(float)
     label_data = label.astype(float)
 
@@ -181,55 +189,74 @@ if __name__ == "__main__":
         SRCNN_modified.load_weights('trained_model.h5')
     else:
         print("Training model...")
-        SRCNN_modified.load_weights('trained_model.h5')
+        # If you want to continue training from previously trained weights, uncomment the next line
+        # SRCNN_modified.load_weights('trained_model.h5')
         train_model(high_res_array_train, low_res_array_train)
 
         print("Saving model...")
         SRCNN_modified.save('trained_model.h5')
 
+    print("Testing data shape:")
+    print(high_res_array_test.shape)
+
     print("Compute the PSNR between each LR image and its prediction...")
-    prediction = SRCNN_modified.predict(low_res_array_test)
+
     predicted_scores = []
     bicubic_scores = []
     for i in range(len(low_res_array_test)):
-        predicted_psnr = compute_psnr(low_res_array_test[i], (prediction[i] * 255))
+        prediction = SRCNN_modified.predict(np.array([low_res_array_test[i]]))
+        predicted_psnr = compute_psnr(low_res_array_test[i], (prediction * 255))
+
+        # Bicubic interpolation is an image processing method of getting good quality high resolution images
+        # when rescaling low resolution ones
         bicubic_interpolation = cv2.resize(low_res_array_test[i], None, fx=1, fy=1, interpolation=cv2.INTER_CUBIC)
-        bicubic_psnr = compute_psnr(bicubic_interpolation, (prediction[i] * 255))
+
+        bicubic_psnr = compute_psnr(bicubic_interpolation, (prediction * 255))
+
         predicted_scores.append(predicted_psnr)
         bicubic_scores.append(bicubic_psnr)
 
+    # Plot the PSNR values
     plt.plot(predicted_scores, label="Predicted PSNR")
     plt.show()
     plt.plot(bicubic_scores, label="Bicubic PSNR")
     plt.show()
 
     image_index = np.argmin(predicted_scores)
-    print("Predicting the image {0} with the minimum PSNR score {1}...".format(image_index,
-                                                                               predicted_scores[image_index]))
+    print("Predicting the image {0} with the minimum PSNR score {1}...".format(
+        image_index, predicted_scores[image_index]))
     min_image_lr = np.array([low_res_array_test[image_index]])
     predicted_min_image = SRCNN_modified.predict(min_image_lr)
+    # We need these computations to properly display the output of the network:
+    # - the normalized values should be between 0 and 1, convert outliers to their closest boundary
+    # - convert [0-1] floats to [0-255] unsigned integers for displaying RGB values
     predicted_min_image = predicted_min_image[0]
     predicted_min_image[np.where(predicted_min_image < 0)] = 0
     predicted_min_image[np.where(predicted_min_image > 1)] = 1
     predicted_min_image *= 255
+    predicted_min_image = predicted_min_image.astype('uint8')
 
-    # Visualize example image
-    cv2.imshow('Low resolution image', low_res_test_data[image_index])
-    cv2.imshow('High resolution image', high_res_test_data[image_index])
-    cv2.imshow('Predicted image', predicted_min_image.astype('uint8'))
+    # Visualize minimum PSNR score image
+    cv2.imshow('Low resolution image with min PSNR', low_res_test_data[image_index])
+    cv2.imshow('High resolution image with min PSNR', high_res_test_data[image_index])
+    cv2.imshow('Predicted image with min PSNR', predicted_min_image)
 
     image_index = np.argmax(predicted_scores)
-    print("Predicting the image {0} with the highest PSNR score {1}...".format(image_index,
-                                                                               predicted_scores[image_index]))
+    print("Predicting the image {0} with the highest PSNR score {1}...".format(
+        image_index, predicted_scores[image_index]))
     max_image_lr = np.array([low_res_array_test[image_index]])
     predicted_max_image = SRCNN_modified.predict(max_image_lr)
+    # We need these computations to properly display the output of the network:
+    # - the normalized values should be between 0 and 1, convert outliers to their closest boundary
+    # - convert [0-1] floats to [0-255] unsigned integers for displaying RGB values
     predicted_max_image = predicted_max_image[0]
     predicted_max_image[np.where(predicted_max_image < 0)] = 0
     predicted_max_image[np.where(predicted_max_image > 1)] = 1
     predicted_max_image *= 255
+    predicted_min_image = predicted_min_image.astype('uint8')
 
-    # Visualize example image
+    # Visualize maximum PSNR score image
     cv2.imshow('Low resolution image with max PSNR', low_res_test_data[image_index])
     cv2.imshow('High resolution image with max PSNR', high_res_test_data[image_index])
-    cv2.imshow('Predicted image with max PSNR', predicted_max_image[0].astype('uint8'))
+    cv2.imshow('Predicted image with max PSNR', predicted_max_image)
     cv2.waitKey(0)
