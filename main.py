@@ -205,13 +205,17 @@ if __name__ == "__main__":
     bicubic_scores = []
     for i in range(len(low_res_array_test)):
         prediction = SRCNN_modified.predict(np.array([low_res_array_test[i]]))
-        predicted_psnr = compute_psnr(low_res_array_test[i], (prediction * 255))
+        prediction[np.where(prediction < 0)] = 0
+        prediction[np.where(prediction > 1)] = 1
+        prediction *= 255
+        predicted_psnr = compute_psnr(low_res_array_test[i], prediction)
 
         # Bicubic interpolation is an image processing method of getting good quality high resolution images
         # when rescaling low resolution ones
-        bicubic_interpolation = cv2.resize(low_res_array_test[i], None, fx=1, fy=1, interpolation=cv2.INTER_CUBIC)
+        bicubic_interpolation = cv2.resize(low_res_array_test[i], (DEFAULT_IMAGE_SIZE, DEFAULT_IMAGE_SIZE), fx=1, fy=1,
+                                           interpolation=cv2.INTER_CUBIC)
 
-        bicubic_psnr = compute_psnr(bicubic_interpolation, (prediction * 255))
+        bicubic_psnr = compute_psnr(bicubic_interpolation, prediction)
 
         predicted_scores.append(predicted_psnr)
         bicubic_scores.append(bicubic_psnr)
@@ -224,7 +228,7 @@ if __name__ == "__main__":
 
     image_index = np.argmin(predicted_scores)
     print("Predicting the image {0} with the minimum PSNR score {1}...".format(
-        image_index, predicted_scores[image_index]))
+        image_index, bicubic_scores[image_index]))
     min_image_lr = np.array([low_res_array_test[image_index]])
     predicted_min_image = SRCNN_modified.predict(min_image_lr)
     # We need these computations to properly display the output of the network:
@@ -243,7 +247,7 @@ if __name__ == "__main__":
 
     image_index = np.argmax(predicted_scores)
     print("Predicting the image {0} with the highest PSNR score {1}...".format(
-        image_index, predicted_scores[image_index]))
+        image_index, bicubic_scores[image_index]))
     max_image_lr = np.array([low_res_array_test[image_index]])
     predicted_max_image = SRCNN_modified.predict(max_image_lr)
     # We need these computations to properly display the output of the network:
